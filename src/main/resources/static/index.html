@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLang Native Studio - Experience Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono&display=swap');
+        .glass { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(16px); }
+        body { background: #020617; color: #f8fafc; font-family: 'Inter', sans-serif; }
+        .monaco-container { height: 100%; width: 100%; border-radius: 8px; overflow: hidden; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        [v-cloak] { display: none; }
+        .status-reliable { border-color: #10b981; color: #10b981; }
+        .status-stale { border-color: #f59e0b; color: #f59e0b; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden flex flex-col p-3">
+    <div id="app" class="flex flex-col h-full gap-3" v-cloak>
+        <!-- Premium Header -->
+        <header class="flex justify-between items-center p-4 glass rounded-2xl border border-slate-800 shadow-2xl">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                    <i class="fas fa-microchip text-white text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
+                        VLang <span class="text-[10px] px-3 py-1 bg-white/10 text-indigo-300 rounded-full border border-indigo-500/20 uppercase tracking-widest">Compiler 1.0</span>
+                    </h1>
+                    <p class="text-[11px] text-slate-500 font-semibold tracking-wide uppercase">{{ t('subtitle') }}</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <div class="flex bg-slate-900/80 rounded-xl p-1.5 border border-slate-800 shadow-inner">
+                    <button @click="compile" :disabled="!selectedObject || isProcessing" 
+                        class="px-5 py-2 text-xs font-bold rounded-lg transition-all hover:bg-white/5 text-indigo-400 disabled:opacity-30 flex items-center gap-2">
+                        <i class="fas fa-magic"></i>{{ isProcessing ? t('processing') : t('compile') }}
+                    </button>
+                    <button @click="handleBuild" :disabled="!selectedObject || isProcessing" 
+                        class="px-5 py-2 text-xs font-bold rounded-lg transition-all hover:bg-white/5 text-amber-400 disabled:opacity-30 border-x border-slate-800 flex items-center gap-2">
+                        <i class="fas fa-hammer"></i>{{ t('build') }}
+                    </button>
+                    <button @click="run" :disabled="!selectedObject || isProcessing" 
+                        class="px-5 py-2 text-xs font-bold rounded-lg transition-all hover:bg-emerald-600/20 text-emerald-400 disabled:opacity-30 flex items-center gap-2">
+                        <i class="fas fa-play"></i>{{ t('run') }}
+                    </button>
+                </div>
+                <div class="h-10 w-px bg-slate-800"></div>
+                <button @click="addObject" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 hover:bg-indigo-600 text-white transition-all shadow-lg">
+                    <i class="fas fa-plus"></i>
+                </button>
+                <button @click="toggleLang" class="w-10 h-10 flex items-center justify-center rounded-xl border border-slate-800 text-[10px] text-slate-500 hover:text-white transition-all">
+                    {{ lang === 'zh' ? 'EN' : 'CN' }}
+                </button>
+            </div>
+        </header>
+
+        <div class="flex flex-1 gap-3 overflow-hidden">
+            <!-- Sidebar: VFS + Convenient Dependency Wall -->
+            <aside class="w-80 flex flex-col gap-3 overflow-hidden">
+                <div class="flex-1 glass rounded-2xl border border-slate-800 p-4 flex flex-col gap-5 overflow-hidden">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-extrabold text-slate-500 tracking-[0.2em] uppercase">{{ t('workspace') }}</span>
+                        <i class="fas fa-sync text-slate-600 text-xs hover:text-indigo-400 cursor-pointer transition-colors" @click="fetchObjects"></i>
+                    </div>
+                    
+                    <nav class="flex-1 overflow-y-auto space-y-1.5 pr-1">
+                        <div v-for="obj in objects" :key="obj.id" 
+                            @click="selectObject(obj)"
+                            :class="selectedObject?.id === obj.id ? 'bg-indigo-600/20 border-indigo-500/50 text-white' : 'border-transparent text-slate-500 hover:bg-white/5'"
+                            class="group flex items-center gap-3 p-3 rounded-xl border animate-in fade-in duration-300 cursor-pointer transition-all">
+                            <i :class="obj.type === 'DIRECTORY' ? 'fa-folder text-amber-500' : 'fa-file-code text-cyan-400'" class="fas text-sm"></i>
+                            <span class="text-xs font-semibold truncate flex-1 tracking-tight">{{ obj.name }}</span>
+                            <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <i v-if="obj.buildStatus === 'RELIABLE'" class="fas fa-circle-check text-[10px] text-emerald-500"></i>
+                                <i @click.stop="deleteObject(obj.id)" class="fas fa-trash-can text-[10px] hover:text-red-500"></i>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <!-- Convenient Dependency Selector -->
+                    <div v-if="selectedObject" class="pt-5 border-t border-slate-800/50 flex flex-col gap-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold text-slate-500 tracking-widest uppercase">{{ t('deps') }}</span>
+                            <span class="text-[9px] px-2 py-0.5 bg-slate-800 rounded font-mono text-slate-600">Smart Link</span>
+                        </div>
+                        <div class="space-y-1 max-h-48 overflow-y-auto bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                            <label v-for="other in allFiles" :key="other.id" class="flex items-center gap-3 cursor-pointer group">
+                                <input type="checkbox" :value="other.id" v-model="selectedObject.dependencyIds" @change="save" 
+                                    class="w-3.5 h-3.5 rounded-sm border-slate-700 bg-slate-800 text-indigo-600 focus:ring-offset-0 focus:ring-0">
+                                <span class="text-[11px] text-slate-500 group-hover:text-slate-300 transition-colors truncate">{{ other.name }}</span>
+                            </label>
+                            <div v-if="!allFiles.length" class="text-[10px] text-slate-700 italic py-2 text-center">No other files available</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Editor & Console -->
+            <div class="flex-1 flex flex-col gap-3 overflow-hidden">
+                <div class="flex-1 glass rounded-2xl border border-slate-800 overflow-hidden flex flex-col shadow-2xl">
+                    <!-- Editor Header -->
+                    <div class="flex items-center justify-between bg-slate-900/40 border-b border-slate-800 px-5 py-2">
+                        <div v-if="selectedObject" class="flex items-center gap-6">
+                            <input v-model="selectedObject.name" @blur="save" class="bg-transparent border-none text-[13px] text-white focus:ring-0 font-bold w-48">
+                            <div class="flex items-center bg-slate-800/50 rounded-lg px-2 gap-2 border border-slate-700/50">
+                                <i class="fas fa-code text-[10px] text-slate-500"></i>
+                                <select v-model="selectedObject.language" @change="handleLanguageChange" class="bg-transparent border-none text-[10px] py-1.5 focus:ring-0 text-slate-300 uppercase font-bold cursor-pointer">
+                                    <option value="natural">{{ t('lang_ai') }}</option>
+                                    <option value="java">Java Class</option>
+                                    <option value="python">Python Module</option>
+                                    <option value="go">Go Lang</option>
+                                    <option value="cpp">C++ Native</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <button @click="activeSplit = 'intent'" :class="activeSplit === 'intent' ? 'text-indigo-400' : 'text-slate-600'" class="text-[10px] font-bold uppercase transition-colors">Intent</button>
+                            <button @click="activeSplit = 'target'" :class="activeSplit === 'target' ? 'text-indigo-400' : 'text-slate-600'" class="text-[10px] font-bold uppercase transition-colors">Raw Code</button>
+                        </div>
+                    </div>
+
+                    <!-- Main Split Editor -->
+                    <div class="flex-1 flex divide-x divide-slate-800/50 overflow-hidden">
+                        <div :class="activeSplit === 'intent' ? 'flex' : 'hidden md:flex'" class="flex-1 flex flex-col min-w-0">
+                            <div class="px-5 py-2 bg-slate-900/20 text-[9px] font-bold text-slate-500 uppercase tracking-widest flex justify-between items-center opacity-70">
+                                <span>Human Intent / VLang Logic</span>
+                                <i class="fas fa-brain"></i>
+                            </div>
+                            <div id="intentEditor" class="monaco-container"></div>
+                        </div>
+                        <div :class="activeSplit === 'target' ? 'flex' : 'hidden md:flex'" class="flex-1 flex flex-col min-w-0 bg-slate-950/20">
+                            <div class="px-5 py-2 bg-slate-900/20 text-[9px] font-bold text-slate-500 uppercase tracking-widest flex justify-between items-center opacity-70">
+                                <span>Native Code / Compilation Output</span>
+                                <div class="flex gap-3">
+                                    <span v-if="isProcessing" class="text-indigo-400 animate-pulse">{{ t('processing') }}</span>
+                                    <i class="fas fa-bolt text-amber-500"></i>
+                                </div>
+                            </div>
+                            <div id="codeEditor" class="monaco-container"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Terminal Console -->
+                <div class="h-60 glass rounded-2xl border border-slate-800 flex flex-col overflow-hidden shadow-2xl">
+                    <div class="flex items-center justify-between p-3 bg-slate-900/60 border-b border-slate-800 px-6">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-terminal text-xs text-indigo-500"></i>
+                            <span class="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">{{ t('console') }}</span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                             <!-- VDebug Indicator -->
+                             <span v-if="output.includes('Intent Line')" class="flex items-center gap-2 text-[9px] font-bold text-red-400 bg-red-400/10 px-2 py-1 rounded-md border border-red-400/20">
+                                <i class="fas fa-bug animate-pulse"></i> {{ t('vdebug_active') }}
+                             </span>
+                             <button @click="output = ''" class="text-slate-600 hover:text-white transition-all"><i class="fas fa-trash-can text-xs"></i></button>
+                        </div>
+                    </div>
+                    <div class="flex-1 p-5 font-mono text-[12px] overflow-y-auto bg-black/40 scrollbar-hide selection:bg-indigo-500/20" ref="termRef">
+                        <div v-if="output">
+                            <template v-for="(line, idx) in output.split('\n')" :key="idx">
+                                <div :class="{'text-red-400 font-bold': line.includes('Intent Line'), 'text-indigo-300/90': !line.includes('Intent Line')}" 
+                                     class="leading-relaxed whitespace-pre-wrap py-0.5 border-l-2 pl-3 border-transparent"
+                                     :class="line.includes('Intent Line') ? 'border-red-500 bg-red-500/5' : ''">
+                                    {{ line }}
+                                </div>
+                            </template>
+                        </div>
+                        <div v-else class="h-full flex flex-col items-center justify-center gap-3 text-slate-700">
+                             <i class="fas fa-ghost text-2xl opacity-20"></i>
+                             <span class="italic text-[11px]">{{ t('waiting') }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, nextTick, computed } = Vue;
+
+        const i18nData = {
+            zh: {
+                subtitle: "原生 AOT 编译器环境",
+                compile: "翻译源码",
+                build: "编译二进制",
+                run: "启动执行",
+                workspace: "虚拟工作区",
+                deps: "智能依赖管理",
+                processing: "处理中...",
+                lang_ai: "自然语言 VLang",
+                console: "编译器后台输出",
+                vdebug_active: "语义调试模式已激活",
+                waiting: "就绪。等待输入指令...",
+                sys_invoking: ">>> 激活 VLLM 智能代理进行逻辑下推...",
+                sys_comp_success: "\n>>> 语义降级成功。生成的 AOT 代码已就绪。\n",
+                sys_build_start: ">>> 启动 AOT 编译器 (GCC 15.2.0)...\n>>> 正在进行跨设备指令集优化...",
+                sys_exec_start: ">>> 初始化隔离沙箱镜像...\n\n--- 运行结果 ---\n"
+            },
+            en: {
+                subtitle: "NATIVE AOT COMPILER ENV",
+                compile: "Gen Code",
+                build: "Build Binary",
+                run: "Run Native",
+                workspace: "VIRTUAL VFS",
+                deps: "SMART DEPENDENCIES",
+                processing: "WAIT...",
+                lang_ai: "NATURAL VLANG",
+                console: "COMPILER OUTPUT",
+                vdebug_active: "SEMANTIC DEBUG ACTIVE",
+                waiting: "Ready. Waiting for command...",
+                sys_invoking: ">>> Invoking VLLM Agent for semantic lowering...",
+                sys_comp_success: "\n>>> Semantic lowering success. AOT Source ready.\n",
+                sys_build_start: ">>> Starting AOT Compiler (GCC 15.2.0)...\n>>> Optimizing instruction sets...",
+                sys_exec_start: ">>> Initializing sandbox image...\n\n--- EXECUTION OUTPUT ---\n"
+            }
+        };
+
+        createApp({
+            setup() {
+                const lang = ref('zh');
+                const objects = ref([]);
+                const selectedObject = ref(null);
+                const output = ref('');
+                const isProcessing = ref(false);
+                const activeSplit = ref('intent');
+                const intelligenceUrl = ref('http://localhost:8010/chat/sync');
+                const termRef = ref(null);
+                
+                let intentEditor = null;
+                let codeEditor = null;
+
+                const t = (key) => i18nData[lang.value][key] || key;
+                const toggleLang = () => { lang.value = lang.value === 'zh' ? 'en' : 'zh'; };
+
+                const allFiles = computed(() => {
+                    return objects.value.filter(o => o.type === 'FILE' && (!selectedObject.value || o.id !== selectedObject.value.id));
+                });
+
+                const initMonaco = () => {
+                    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+                    require(['vs/editor/editor.main'], function() {
+                        const theme = {
+                            base: 'vs-dark',
+                            inherit: true,
+                            rules: [],
+                            colors: {
+                                'editor.background': '#02061700',
+                                'editor.lineHighlightBackground': '#1e293b30',
+                                'editor.selectionBackground': '#6366f130',
+                            }
+                        };
+                        monaco.editor.defineTheme('vlang-dark', theme);
+
+                        intentEditor = monaco.editor.create(document.getElementById('intentEditor'), {
+                            value: '', language: 'markdown', theme: 'vlang-dark', automaticLayout: true,
+                            fontSize: 14, fontFamily: 'JetBrains Mono', minimap: { enabled: false },
+                            lineNumbers: 'on', roundedSelection: true, scrollBeyondLastLine: false,
+                            padding: { top: 20 }
+                        });
+
+                        codeEditor = monaco.editor.create(document.getElementById('codeEditor'), {
+                            value: '', language: 'cpp', theme: 'vlang-dark', readOnly: true, automaticLayout: true,
+                            fontSize: 13, fontFamily: 'JetBrains Mono', minimap: { enabled: true },
+                            lineNumbers: 'on', padding: { top: 20 }
+                        });
+
+                        intentEditor.onDidChangeModelContent(() => {
+                            if (selectedObject.value) selectedObject.value.content = intentEditor.getValue();
+                        });
+                    });
+                };
+
+                const fetchObjects = async () => {
+                    const res = await fetch('/api/virtual/objects');
+                    objects.value = await res.json();
+                };
+
+                const selectObject = (obj) => {
+                    if (selectedObject.value) save();
+                    selectedObject.value = obj;
+                    if (!selectedObject.value.dependencyIds) selectedObject.value.dependencyIds = [];
+                    
+                    if (intentEditor) {
+                        intentEditor.setValue(obj.content || '');
+                        monaco.editor.setModelLanguage(intentEditor.getModel(), obj.language === 'natural' ? 'markdown' : obj.language);
+                    }
+                    if (codeEditor) {
+                        codeEditor.setValue(obj.generatedCode || '');
+                        monaco.editor.setModelLanguage(codeEditor.getModel(), 'cpp');
+                    }
+                };
+
+                const handleLanguageChange = () => {
+                    if (intentEditor && selectedObject.value) {
+                        monaco.editor.setModelLanguage(intentEditor.getModel(), selectedObject.value.language === 'natural' ? 'markdown' : selectedObject.value.language);
+                    }
+                    save();
+                };
+
+                const addObject = async () => {
+                    const res = await fetch('/api/virtual/objects', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            name: 'app.vlang', type: 'FILE', language: 'natural', 
+                            content: '---\nimports: []\n---\n这里写您的逻辑...', dependencyIds: [] 
+                        })
+                    });
+                    const newObj = await res.json();
+                    objects.value.push(newObj);
+                    selectObject(newObj);
+                };
+
+                const deleteObject = async (id) => {
+                    await fetch(`/api/virtual/objects/${id}`, { method: 'DELETE' });
+                    fetchObjects();
+                };
+
+                const save = async () => {
+                    if (!selectedObject.value) return;
+                    await fetch(`/api/virtual/objects/${selectedObject.value.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(selectedObject.value)
+                    });
+                };
+
+                const compile = async () => {
+                    if (!selectedObject.value) return;
+                    isProcessing.value = true;
+                    save();
+                    output.value = t('sys_invoking') + '\n';
+                    try {
+                        const targetLang = 'cpp';
+                        const res = await fetch(`/api/virtual/objects/${selectedObject.value.id}/compile?targetLanguage=${targetLang}`, {
+                            method: 'POST'
+                        });
+                        const code = await res.text();
+                        if (code) {
+                            selectedObject.value.generatedCode = code;
+                            if (codeEditor) codeEditor.setValue(code);
+                            output.value += t('sys_comp_success');
+                            activeSplit.value = 'target';
+                            await save();
+                        }
+                    } catch (e) {
+                         output.value += '[ERROR] ' + e.message;
+                    } finally {
+                        isProcessing.value = false;
+                        scrollLog();
+                    }
+                };
+
+                const handleBuild = async () => {
+                    if (!selectedObject.value) return;
+                    isProcessing.value = true;
+                    output.value = t('sys_build_start') + '\n';
+                    try {
+                        const res = await fetch(`/api/virtual/objects/${selectedObject.value.id}/build`, { method: 'POST' });
+                        const log = await res.text();
+                        output.value += `\n--- BUILD LOG ---\n${log}\n--- END ---\n`;
+                    } catch (e) {
+                        output.value += '[ERROR] Build failed: ' + e.message;
+                    } finally {
+                        isProcessing.value = false;
+                        scrollLog();
+                    }
+                };
+
+                const run = async () => {
+                    if (!selectedObject.value) return;
+                    isProcessing.value = true;
+                    save();
+                    output.value = t('sys_exec_start');
+                    try {
+                        const res = await fetch(`/api/virtual/objects/${selectedObject.value.id}/run?language=${selectedObject.value.language}`, {
+                            method: 'POST'
+                        });
+                        output.value += await res.text();
+                    } catch (e) {
+                        output.value += '[ERROR] ' + e.message;
+                    } finally {
+                        isProcessing.value = false;
+                        scrollLog();
+                    }
+                };
+
+                const scrollLog = () => {
+                    nextTick(() => {
+                        if (termRef.value) termRef.value.scrollTop = termRef.value.scrollHeight;
+                    });
+                }
+
+                onMounted(() => {
+                    fetchObjects();
+                    initMonaco();
+                });
+
+                return { 
+                    lang, t, toggleLang, allFiles, activeSplit, termRef,
+                    objects, selectedObject, output, isProcessing, intelligenceUrl,
+                    selectObject, addObject, deleteObject, save, compile, handleBuild, run, handleLanguageChange 
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
